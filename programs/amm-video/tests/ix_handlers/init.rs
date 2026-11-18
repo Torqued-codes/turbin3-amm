@@ -12,8 +12,9 @@ use {
 };
 
 pub fn create_initialise_ix(
-    mut _svm: &mut LiteSVM,
+    _svm: &mut LiteSVM,
     payer: &Keypair,
+    treasury: Pubkey,
     mint_x: Pubkey,
     mint_y: Pubkey,
     config: Pubkey,
@@ -28,11 +29,13 @@ pub fn create_initialise_ix(
         &amm_video::instruction::Initialize {
             seed: 123,
             fee: 30,
+            protocol_fee: 10,
             authority: Some(maker),
         }
         .data(),
         amm_video::accounts::Initialize {
             initializer: maker,
+            treasury,
             mint_x,
             mint_y,
             mint_lp,
