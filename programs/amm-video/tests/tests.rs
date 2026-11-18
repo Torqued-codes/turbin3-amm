@@ -1,9 +1,10 @@
 use {
     anchor_spl::associated_token,
     litesvm::LiteSVM,
-    litesvm_token::CreateMint,
+    litesvm_token::{spl_token::state::Account as TokenAccount, CreateMint},
     solana_keypair::Keypair,
     solana_message::{Instruction, Message, VersionedMessage},
+    solana_program_pack::Pack,
     solana_pubkey::Pubkey,
     solana_signer::Signer,
     solana_transaction::versioned::VersionedTransaction,
@@ -25,7 +26,6 @@ fn send(
     svm.send_transaction(tx)
 }
 
-// Setup function to initialize LiteSVM and create a payer keypair
 fn setup() -> (
     LiteSVM,
     Keypair,
@@ -35,16 +35,16 @@ fn setup() -> (
     Pubkey,
     Pubkey,
     Pubkey,
+    Pubkey,
 ) {
     let program_id = amm_video::id();
     let payer = Keypair::new();
+    let treasury = Keypair::new().pubkey();
     let mut svm = LiteSVM::new();
     let bytes = include_bytes!("../../../target/deploy/amm_video.so");
     svm.add_program(program_id, bytes).unwrap();
     svm.airdrop(&payer.pubkey(), 1_000_000_000).unwrap();
 
-    // Create two mints (Mint A and Mint B) with 6 decimal places and the maker as the authority
-    // This done using litesvm-token's CreateMint utility which creates the mint in the LiteSVM environment
     let mint_x = CreateMint::new(&mut svm, &payer)
         .decimals(6)
         .authority(&payer.pubkey())
@@ -61,21 +61,20 @@ fn setup() -> (
         Pubkey::find_program_address(&[b"config", &123u64.to_le_bytes()], &amm_video::id()).0;
     let mint_lp = Pubkey::find_program_address(&[b"lp", config.as_ref()], &amm_video::id()).0;
 
-    // Derive the PDA for the vault associated token account using the config PDA and Mint A
     let vault_x = associated_token::get_associated_token_address(&config, &mint_x);
     let vault_y = associated_token::get_associated_token_address(&config, &mint_y);
 
     (
-        svm, payer, mint_x, mint_y, config, mint_lp, vault_x, vault_y,
+        svm, payer, treasury, mint_x, mint_y, config, mint_lp, vault_x, vault_y,
     )
 }
 
 #[test]
 fn test_initialize() {
-    let (mut svm, payer, mint_x, mint_y, config, mint_lp, vault_x, vault_y) = setup();
+    let (mut svm, payer, treasury, mint_x, mint_y, config, mint_lp, vault_x, vault_y) = setup();
 
     let instruction = create_initialise_ix(
-        &mut svm, &payer, mint_x, mint_y, config, mint_lp, vault_x, vault_y,
+        &mut svm, &payer, treasury, mint_x, mint_y, config, mint_lp, vault_x, vault_y,
     );
     let res = send(&mut svm, &[instruction], &payer, &[&payer]);
     assert!(res.is_ok());
@@ -83,9 +82,9 @@ fn test_initialize() {
 
 #[test]
 pub fn test_deposit() {
-    let (mut svm, payer, mint_x, mint_y, config, mint_lp, vault_x, vault_y) = setup();
+    let (mut svm, payer, treasury, mint_x, mint_y, config, mint_lp, vault_x, vault_y) = setup();
     let init_ix = create_initialise_ix(
-        &mut svm, &payer, mint_x, mint_y, config, mint_lp, vault_x, vault_y,
+        &mut svm, &payer, treasury, mint_x, mint_y, config, mint_lp, vault_x, vault_y,
     );
 
     let deposit_ix = create_deposit_ix(
@@ -98,9 +97,9 @@ pub fn test_deposit() {
 
 #[test]
 pub fn test_withdraw() {
-    let (mut svm, payer, mint_x, mint_y, config, mint_lp, vault_x, vault_y) = setup();
+    let (mut svm, payer, treasury, mint_x, mint_y, config, mint_lp, vault_x, vault_y) = setup();
     let init_ix = create_initialise_ix(
-        &mut svm, &payer, mint_x, mint_y, config, mint_lp, vault_x, vault_y,
+        &mut svm, &payer, treasury, mint_x, mint_y, config, mint_lp, vault_x, vault_y,
     );
 
     let deposit_ix = create_deposit_ix(
@@ -121,9 +120,9 @@ pub fn test_withdraw() {
 
 #[test]
 pub fn test_swap() {
-    let (mut svm, payer, mint_x, mint_y, config, mint_lp, vault_x, vault_y) = setup();
+    let (mut svm, payer, treasury, mint_x, mint_y, config, mint_lp, vault_x, vault_y) = setup();
     let init_ix = create_initialise_ix(
-        &mut svm, &payer, mint_x, mint_y, config, mint_lp, vault_x, vault_y,
+        &mut svm, &payer, treasury, mint_x, mint_y, config, mint_lp, vault_x, vault_y,
     );
 
     let deposit_ix = create_deposit_ix(
@@ -131,9 +130,15 @@ pub fn test_swap() {
     );
 
     let swap_ix = create_swap_ix(
-        &mut svm, &payer, mint_x, mint_y, mint_lp, config, vault_x, vault_y,
+        &mut svm, &payer, treasury, mint_x, mint_y, mint_lp, config, vault_x, vault_y,
     );
 
     let res = send(&mut svm, &[init_ix, deposit_ix, swap_ix], &payer, &[&payer]);
     assert!(res.is_ok());
+
+    // Verify 10 bps protocol fee (10_000_000 * 10 / 10_000 = 10_000) landed in treasury_x
+    let treasury_x = associated_token::get_associated_token_address(&treasury, &mint_x);
+    let treasury_account_data = svm.get_account(&treasury_x).unwrap();
+    let treasury_token_account = TokenAccount::unpack(&treasury_account_data.data).unwrap();
+    assert_eq!(treasury_token_account.amount, 10_000);
 }
