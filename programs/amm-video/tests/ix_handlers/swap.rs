@@ -12,8 +12,9 @@ use {
 };
 
 pub fn create_swap_ix(
-    mut _svm: &mut LiteSVM,
+    _svm: &mut LiteSVM,
     payer: &Keypair,
+    treasury: Pubkey,
     mint_x: Pubkey,
     mint_y: Pubkey,
     mint_lp: Pubkey,
@@ -24,6 +25,8 @@ pub fn create_swap_ix(
     let user = payer.pubkey();
     let user_x = associated_token::get_associated_token_address(&user, &mint_x);
     let user_y = associated_token::get_associated_token_address(&user, &mint_y);
+    let treasury_x = associated_token::get_associated_token_address(&treasury, &mint_x);
+    let treasury_y = associated_token::get_associated_token_address(&treasury, &mint_y);
 
     Instruction::new_with_bytes(
         amm_video::id(),
@@ -38,11 +41,14 @@ pub fn create_swap_ix(
             mint_x,
             mint_y,
             config,
+            treasury,
             mint_lp,
             vault_x,
             vault_y,
             user_x,
             user_y,
+            treasury_x,
+            treasury_y,
             token_program: TOKEN_PROGRAM_ID,
             associated_token_program: ASSOCIATED_TOKEN_PROGRAM_ID,
             system_program: SYSTEM_PROGRAM_ID,
@@ -50,3 +56,4 @@ pub fn create_swap_ix(
         .to_account_metas(None),
     )
 }
+
