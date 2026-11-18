@@ -3,7 +3,6 @@ use anchor_spl::{
     associated_token::AssociatedToken,
     token::{burn, transfer, Burn, Mint, Token, TokenAccount, Transfer},
 };
-use constant_product_curve::ConstantProduct;
 
 use crate::{error::AmmError, state::Config};
 
@@ -70,16 +69,22 @@ impl<'info> Withdraw<'info> {
     ) -> Result<()> {
         require!(!self.config.locked, AmmError::PoolLocked);
         require_neq!(amount, 0, AmmError::InvalidAmount);
+        require_neq!(self.mint_lp.supply, 0, AmmError::NoLiquidityInPool);
 
-        let amounts = ConstantProduct::xy_withdraw_amounts_from_l(
-            self.vault_x.amount,
-            self.vault_y.amount,
-            self.mint_lp.supply,
-            amount,
-            6,
-        )
-        .unwrap();
-        let (x, y) = (amounts.x, amounts.y);
+        let amount_u128 = amount as u128;
+        let supply_u128 = self.mint_lp.supply as u128;
+
+        let x = (self.vault_x.amount as u128)
+            .checked_mul(amount_u128)
+            .ok_or(AmmError::Overflow)?
+            .checked_div(supply_u128)
+            .ok_or(AmmError::Underflow)? as u64;
+
+        let y = (self.vault_y.amount as u128)
+            .checked_mul(amount_u128)
+            .ok_or(AmmError::Overflow)?
+            .checked_div(supply_u128)
+            .ok_or(AmmError::Underflow)? as u64;
 
         require!(x >= min_x && y >= min_y, AmmError::SlippageExceeded);
 
