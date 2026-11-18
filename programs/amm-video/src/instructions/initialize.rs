@@ -4,19 +4,21 @@ use anchor_spl::{
     token::{Mint, Token, TokenAccount},
 };
 
-use crate::state::Config;
+use crate::{error::AmmError, state::Config};
 
 #[derive(Accounts)]
 #[instruction(seed: u64)]
 pub struct Initialize<'info> {
     #[account(mut)]
     pub initializer: Signer<'info>,
+    /// CHECK: Treasury wallet receiving protocol fees
+    pub treasury: UncheckedAccount<'info>,
     pub mint_x: Account<'info, Mint>,
     pub mint_y: Account<'info, Mint>,
     #[account(
         init,
         payer = initializer,
-        seeds = [b"lp", config.key.as_ref()],
+        seeds = [b"lp", config.key().as_ref()],
         bump,
         mint::decimals = 6,
         mint::authority = config,
@@ -54,15 +56,20 @@ impl<'info> Initialize<'info> {
         &mut self,
         seed: u64,
         fee: u16,
+        protocol_fee: u16,
         authority: Option<Pubkey>,
         bumps: InitializeBumps,
     ) -> Result<()> {
+        require!(fee + protocol_fee <= 10_000, AmmError::FeePercentErr);
+
         self.config.set_inner(Config {
             seed,
             authority,
+            treasury: self.treasury.key(),
             mint_x: self.mint_x.key(),
             mint_y: self.mint_y.key(),
             fee,
+            protocol_fee,
             locked: false,
             config_bump: bumps.config,
             lp_bump: bumps.mint_lp,
