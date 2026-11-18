@@ -3,7 +3,6 @@ use anchor_spl::{
     associated_token::AssociatedToken,
     token::{mint_to, transfer, Mint, MintTo, Token, TokenAccount, Transfer},
 };
-use constant_product_curve::ConstantProduct;
 
 use crate::{error::AmmError, state::Config};
 
@@ -76,21 +75,24 @@ impl<'info> Deposit<'info> {
             if self.mint_lp.supply == 0 && self.vault_x.amount == 0 && self.vault_y.amount == 0 {
                 (max_x, max_y)
             } else {
-                let amounts = ConstantProduct::xy_deposit_amounts_from_l(
-                    self.vault_x.amount,
-                    self.vault_y.amount,
-                    self.mint_lp.supply,
-                    amount,
-                    6,
-                )
-                .unwrap();
+                let amount_u128 = amount as u128;
+                let supply_u128 = self.mint_lp.supply as u128;
 
-                require!(
-                    amounts.x <= max_x && amounts.y <= max_y,
-                    AmmError::SlippageExceeded
-                );
+                let x = (self.vault_x.amount as u128)
+                    .checked_mul(amount_u128)
+                    .ok_or(AmmError::Overflow)?
+                    .checked_div(supply_u128)
+                    .ok_or(AmmError::Underflow)? as u64;
 
-                (amounts.x, amounts.y)
+                let y = (self.vault_y.amount as u128)
+                    .checked_mul(amount_u128)
+                    .ok_or(AmmError::Overflow)?
+                    .checked_div(supply_u128)
+                    .ok_or(AmmError::Underflow)? as u64;
+
+                require!(x <= max_x && y <= max_y, AmmError::SlippageExceeded);
+
+                (x, y)
             };
 
         // deposit token x
